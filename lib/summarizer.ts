@@ -1,109 +1,213 @@
+import { generateStructuredSummary } from './structuredSummarizer';
+import { preprocessText } from './textPreprocessor';
+
 export async function summarizeText(
+  text: string,
+  type: 'short' | 'detailed' = 'detailed'
+): Promise<string> {
+  // Use structured summarization for better quality
+  try {
+    // Preprocess first
+    const preprocessed = preprocessText(text);
+
+    // For very long texts, we still need chunking
+    const maxLength = 3000; // Increased for better context
+    const chunks = chunkText(preprocessed.normalized, maxLength);
+
+    if (chunks.length === 1) {
+      // Single chunk - use structured summarization directly
+      return await generateStructuredSummary(chunks[0], type);
+    }
+
+    // Multiple chunks - summarize each, then merge
+    let summaries: string[] = [];
+
+    for (const chunk of chunks) {
+      try {
+        // Use structured summarization for each chunk
+        const chunkSummary = await generateStructuredSummary(chunk, type);
+        summaries.push(chunkSummary);
+      } catch (error: any) {
+        console.error('Error summarizing chunk:', error);
+        // If one chunk fails, use intelligent fallback - extract key sentences
+        const sentences = chunk
+          .split(/[.!?]+/)
+          .map(s => s.trim())
+          .filter(s => {
+            // Filter out very short sentences and common noise
+            if (s.length < 15) return false;
+            if (/Copyright|All rights reserved|Page \d+|Slide \d+/i.test(s)) return false;
+            if (/^\d+$/.test(s)) return false;
+            return true;
+          });
+
+        const count =
+          type === 'short' ? Math.min(5, sentences.length) : Math.min(10, sentences.length);
+        const fallback = sentences.slice(0, count).join('. ').trim();
+        if (fallback) {
+          summaries.push(fallback + (fallback.endsWith('.') ? '' : '.'));
+        }
+      }
+    }
+
+    // Merge summaries using structured approach
+    if (summaries.length > 1) {
+      try {
+        const combinedSummaries = summaries.join('\n\n---\n\n');
+        // Re-summarize the merged summaries with structured approach
+        return await generateStructuredSummary(combinedSummaries, type);
+      } catch (error) {
+        console.error('Error merging summaries:', error);
+        // Fallback: return joined summaries with separator
+        return summaries.join('\n\n---\n\n');
+      }
+    }
+
+    return summaries[0] || 'Could not generate summary.';
+  } catch (error: any) {
+    console.error('Structured summarization failed, falling back to basic:', error);
+    // Fallback to basic summarization
+    return await basicSummarization(text, type);
+  }
+}
+
+/**
+ * Basic summarization fallback
+ */
+async function basicSummarization(
   text: string,
   type: 'short' | 'detailed' = 'short'
 ): Promise<string> {
-  // Chunk text if it's too long (HuggingFace models have token limits)
-  const maxLength = 2000 // Approximate token limit for free tier
-  const chunks = chunkText(text, maxLength)
-
-  let summaries: string[] = []
+  const maxLength = 2000;
+  const chunks = chunkText(text, maxLength);
+  let summaries: string[] = [];
 
   for (const chunk of chunks) {
     try {
-      const summary = await summarizeChunk(chunk, type)
-      summaries.push(summary)
+      const response = await fetch('/api/summarize', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          text: chunk,
+          type: type,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      if (data.summary) {
+        summaries.push(data.summary);
+      }
     } catch (error) {
-      console.error('Error summarizing chunk:', error)
-      // If one chunk fails, try to continue with others
-      summaries.push(chunk.substring(0, 200) + '...') // Fallback: first 200 chars
+      console.error('Error in basic summarization:', error);
     }
   }
 
-  // If we have multiple chunks, summarize the summaries
   if (summaries.length > 1) {
-    const combinedSummaries = summaries.join('\n\n')
-    return await summarizeChunk(combinedSummaries, type)
-  }
+    try {
+      const combined = summaries.join('\n\n');
+      const response = await fetch('/api/summarize', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          text: combined,
+          type: type,
+        }),
+      });
 
-  return summaries[0] || 'Could not generate summary.'
-}
-
-async function summarizeChunk(
-  text: string,
-  type: 'short' | 'detailed'
-): Promise<string> {
-  // Using HuggingFace Inference API (free tier)
-  // Model: facebook/bart-large-cnn (good for summarization)
-  const API_URL = 'https://api-inference.huggingface.co/models/facebook/bart-large-cnn'
-
-  const maxLength = type === 'short' ? 200 : 400
-  const minLength = type === 'short' ? 100 : 200
-
-  const response = await fetch(API_URL, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      inputs: text,
-      parameters: {
-        max_length: maxLength,
-        min_length: minLength,
-        do_sample: false,
-      },
-    }),
-  })
-
-  if (!response.ok) {
-    // If rate limited or model is loading, try a fallback approach
-    if (response.status === 503) {
-      throw new Error('Model is loading. Please wait a moment and try again.')
+      if (response.ok) {
+        const data = await response.json();
+        if (data.summary) {
+          return data.summary;
+        }
+      }
+    } catch (error) {
+      console.error('Error merging basic summaries:', error);
     }
-    if (response.status === 429) {
-      throw new Error('Rate limit exceeded. Please try again in a minute.')
-    }
-    throw new Error(`API error: ${response.statusText}`)
+    return summaries.join('\n\n');
   }
 
-  const data = await response.json()
-
-  if (Array.isArray(data) && data[0] && data[0].summary_text) {
-    return data[0].summary_text
-  }
-
-  if (data.error) {
-    throw new Error(data.error)
-  }
-
-  // Fallback: return a simple extraction if API doesn't work
-  return extractFallbackSummary(text, type)
+  return summaries[0] || 'Could not generate summary.';
 }
 
 function chunkText(text: string, maxLength: number): string[] {
-  const chunks: string[] = []
-  const sentences = text.match(/[^.!?]+[.!?]+/g) || [text]
-  let currentChunk = ''
+  // If text is short enough, return as single chunk
+  if (text.length <= maxLength) {
+    return [text];
+  }
 
-  for (const sentence of sentences) {
-    if ((currentChunk + sentence).length > maxLength && currentChunk) {
-      chunks.push(currentChunk.trim())
-      currentChunk = sentence
-    } else {
-      currentChunk += sentence
+  const chunks: string[] = [];
+
+  // Enhanced chunking: prefer section boundaries
+  const sectionMarkers = /##SECTION##/g;
+  const hasSectionMarkers = sectionMarkers.test(text);
+
+  if (hasSectionMarkers) {
+    // Split by sections, preserving section markers
+    const sections = text.split(/(##SECTION##[^#]+##SECTION##)/);
+    let currentChunk = '';
+
+    for (const section of sections) {
+      if ((currentChunk + section).length > maxLength && currentChunk) {
+        chunks.push(currentChunk.trim());
+        currentChunk = section;
+      } else {
+        currentChunk = currentChunk + section;
+      }
+    }
+
+    if (currentChunk) {
+      chunks.push(currentChunk.trim());
     }
   }
 
-  if (currentChunk) {
-    chunks.push(currentChunk.trim())
+  // If no sections or chunking failed, use paragraph-based chunking
+  if (chunks.length === 0) {
+    const paragraphs = text.split(/\n\s*\n/).filter(p => p.trim());
+
+    if (paragraphs.length > 1) {
+      let currentChunk = '';
+
+      for (const paragraph of paragraphs) {
+        if ((currentChunk + '\n\n' + paragraph).length > maxLength && currentChunk) {
+          chunks.push(currentChunk.trim());
+          currentChunk = paragraph;
+        } else {
+          currentChunk = currentChunk ? currentChunk + '\n\n' + paragraph : paragraph;
+        }
+      }
+
+      if (currentChunk) {
+        chunks.push(currentChunk.trim());
+      }
+    } else {
+      // Fall back to sentence splitting with overlap
+      const sentences = text.match(/[^.!?]+[.!?]+/g) || [text];
+      let currentChunk = '';
+
+      for (let i = 0; i < sentences.length; i++) {
+        const sentence = sentences[i];
+        if ((currentChunk + ' ' + sentence).length > maxLength && currentChunk) {
+          chunks.push(currentChunk.trim());
+          // Start new chunk with last 200 chars for overlap (better continuity)
+          currentChunk = currentChunk.slice(-200) + ' ' + sentence;
+        } else {
+          currentChunk = currentChunk ? currentChunk + ' ' + sentence : sentence;
+        }
+      }
+
+      if (currentChunk) {
+        chunks.push(currentChunk.trim());
+      }
+    }
   }
 
-  return chunks.length > 0 ? chunks : [text]
+  return chunks.length > 0 ? chunks : [text.substring(0, maxLength)];
 }
-
-function extractFallbackSummary(text: string, type: 'short' | 'detailed'): string {
-  // Simple fallback: take first few sentences
-  const sentences = text.match(/[^.!?]+[.!?]+/g) || [text]
-  const count = type === 'short' ? 3 : 6
-  return sentences.slice(0, count).join(' ')
-}
-

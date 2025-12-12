@@ -1,4 +1,4 @@
-# PDF Summarizer MVP
+# Quick Read MVP
 
 A lightweight, zero-cost web tool that allows students to upload a PDF and instantly receive a clean, concise summary.
 
@@ -30,11 +30,13 @@ A lightweight, zero-cost web tool that allows students to upload a PDF and insta
 1. Clone or download this repository
 
 2. Install dependencies:
+
 ```bash
 npm install
 ```
 
 3. Run the development server:
+
 ```bash
 npm run dev
 ```
@@ -46,11 +48,13 @@ npm run dev
 ### Option 1: Deploy via Vercel CLI
 
 1. Install Vercel CLI:
+
 ```bash
 npm i -g vercel
 ```
 
 2. Deploy:
+
 ```bash
 vercel
 ```
@@ -72,6 +76,7 @@ vercel
 No environment variables are required for the MVP! The HuggingFace Inference API is used without authentication for the free tier.
 
 **Note:** If you hit rate limits, you can:
+
 - Add a `HUGGINGFACE_API_KEY` environment variable to your Vercel project
 - Update `lib/summarizer.ts` to use the API key in headers
 
@@ -92,7 +97,7 @@ Edit the donation buttons in `app/page.tsx`:
 Change the `MAX_FILE_SIZE` constant in `app/page.tsx`:
 
 ```tsx
-const MAX_FILE_SIZE = 10 * 1024 * 1024 // 10MB
+const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 ```
 
 ### Changing Summary Length
@@ -100,8 +105,8 @@ const MAX_FILE_SIZE = 10 * 1024 * 1024 // 10MB
 Modify the `maxLength` and `minLength` parameters in `lib/summarizer.ts`:
 
 ```tsx
-const maxLength = type === 'short' ? 200 : 400
-const minLength = type === 'short' ? 100 : 200
+const maxLength = type === 'short' ? 200 : 400;
+const minLength = type === 'short' ? 100 : 200;
 ```
 
 ## Limitations (MVP)
@@ -120,6 +125,7 @@ HuggingFace free tier models can take 20-30 seconds to wake up if not used recen
 ### "Rate limit exceeded"
 
 The free tier has rate limits. Options:
+
 1. Wait a minute and try again
 2. Add a HuggingFace API key (free at huggingface.co)
 
@@ -149,4 +155,3 @@ Did this save you time? Support this tool with $1 ❤️
 ---
 
 Built as part of the "$1 Challenge" - validating that software skills are valuable and people will pay for time-saving tools.
-
