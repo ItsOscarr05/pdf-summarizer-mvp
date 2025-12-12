@@ -737,15 +737,56 @@ export default function Home() {
                         const prevBulletIntroducesList =
                           prevIsBullet && prevLineClean.endsWith(':');
 
+                        // Check if we're in a sub-bullet chain (looking backwards to see if we started from a colon)
+                        let inSubBulletChain = false;
+                        if (isBullet && prevIsBullet && !prevIsSectionHeader) {
+                          // Walk backwards to find if we started from a bullet ending with colon
+                          for (let i = index - 1; i >= 0; i--) {
+                            const checkLine = array[i].trim();
+                            const checkClean = checkLine
+                              .replace(new RegExp(`^[•▪▫◦‣⁃]\\s*`), '')
+                              .replace(/^[-\*]\s+(?=[A-Z])/, '')
+                              .replace(/^\d+\.\s*/, '');
+
+                            const checkIsBullet =
+                              bulletChars.some(c => checkLine.startsWith(c)) ||
+                              /^[-\*]\s+[A-Z]/.test(checkLine) ||
+                              /^\d+\.\s/.test(checkLine);
+
+                            if (!checkIsBullet) break;
+                            if (checkClean.endsWith(':')) {
+                              inSubBulletChain = true;
+                              break;
+                            }
+                            // Stop if we hit a section header or clear break
+                            if (i > 0) {
+                              const beforeClean = array[i - 1]
+                                .trim()
+                                .replace(new RegExp(`^[•▪▫◦‣⁃]\\s*`), '')
+                                .replace(/^[-\*]\s+(?=[A-Z])/, '')
+                                .replace(/^\d+\.\s*/, '');
+                              const beforeIsHeader =
+                                beforeClean.length > 20 &&
+                                beforeClean.length < 100 &&
+                                (/^[A-Z][A-Z\s&:]+$/.test(beforeClean) ||
+                                  /^(What|How|Why|The|Introduction|Summary|Key|Main|Advanced|Factor)/i.test(
+                                    beforeClean
+                                  ));
+                              if (beforeIsHeader) break;
+                            }
+                          }
+                        }
+
                         // Check if this is a sub-bullet:
                         // 1. Previous bullet introduces a list (ends with colon), OR
-                        // 2. Bullet follows another bullet without section header (nested content)
+                        // 2. We're in a sub-bullet chain, OR
+                        // 3. Bullet follows another bullet without section header (nested content)
                         const isSubBullet =
                           isBullet &&
                           !isTitle &&
                           prevIsBullet &&
                           !prevIsSectionHeader &&
-                          (prevBulletIntroducesList || !isSectionHeader);
+                          (prevBulletIntroducesList || inSubBulletChain);
 
                         // Check if we need a section divider (before section headers)
                         const needsSectionDivider = isSectionHeader && index > 0;

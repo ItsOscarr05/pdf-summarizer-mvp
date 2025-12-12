@@ -105,7 +105,8 @@ function removeDuplicates(text: string): string {
     if (normalized && seen.has(normalized)) {
       consecutiveDuplicateCount++
       // Only skip if we've seen many duplicates (likely headers/footers)
-      if (consecutiveDuplicateCount < 3) {
+      // Allow first 2 duplicates but skip 3rd and beyond
+      if (consecutiveDuplicateCount >= 3) {
         continue
       }
     } else {
